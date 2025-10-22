@@ -4,8 +4,11 @@
   "description": "Transcode .m4a to FLAC and launch Speech-to-Text v2 BatchRecognize.",
   "main": "index.js",
   "type": "commonjs",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
+    "@google-cloud/functions-framework": "^4.0.0",
     "@google-cloud/speech": "^6.6.0",
     "@google-cloud/storage": "^7.11.0"
   }
