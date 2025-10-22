@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "commonjs",
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <23"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "^4.0.0",
