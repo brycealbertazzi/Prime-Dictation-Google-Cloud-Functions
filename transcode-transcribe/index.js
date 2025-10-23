@@ -6,6 +6,7 @@
 const { Storage } = require('@google-cloud/storage');
 const { SpeechClient } = require('@google-cloud/speech').v2;
 const { spawn } = require('child_process');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -13,15 +14,17 @@ const storage = new Storage();
 const speech = new SpeechClient();
 
 // -------- Env vars (set at deploy) --------
-// BUCKET_UPLOADS        = prime-dictation-audio-files
+// BUCKET_UPLOADS             = prime-dictation-audio-files
+// FLAC_TRANSCODES_BUCKET     = prime-dictation-flac-files
+// TXT_TRANSCRIPTS_BUCKET     = prime-dictation-txt-files
 // RECOGNIZER            = projects/<PROJECT_ID>/locations/us-central1/recognizers/prime-default
-// TRANSCRIPTS_PREFIX    = transcribed-files/      (default)
-// FLAC_PREFIX           = flac/                   (default)
 // LANGUAGE_CODES        = en-US                   (comma-separated; optional)
 // SPEECH_MODEL          = long                    (optional)
 // ------------------------------------------
 
 const UPLOAD_BUCKET      = must('BUCKET_UPLOADS');
+const FLAC_TRANSCODES_BUCKET    = must('FLAC_TRANSCODES_BUCKET')
+const TXT_TRANSCRIPTS_BUCKET   = must('TXT_TRANSCRIPTS_BUCKET')
 const RECOGNIZER         = must('RECOGNIZER');
 const TRANSCRIPTS_PREFIX = process.env.TRANSCRIPTS_PREFIX || 'transcribed-files/';
 const FLAC_PREFIX        = process.env.FLAC_PREFIX || 'transcoded-files/';
@@ -29,15 +32,14 @@ const LANGUAGE_CODES     = (process.env.LANGUAGE_CODES || 'en-US').split(',').ma
 const SPEECH_MODEL       = process.env.SPEECH_MODEL || 'long';
 
 exports.onAudioUploaded = async (event /*, context */) => {
-  const { bucket, name: objectName, contentType, size } = event || {};
+  const { bucket, name: objectName, contentType, size } = event?.data || {};
   if (!bucket || !objectName) return;
   if (bucket !== UPLOAD_BUCKET) return;
-  if (!objectName.startsWith('m4a-files/')) return; // only handle uploads under mp4-files/
 
   const base = path.basename(objectName).replace(/\.[^.]+$/, '');   // "foo"
   const tmpIn  = `/tmp/${base}.m4a`;
   const tmpOut = `/tmp/${base}.flac`;
-  const flacKey = objectName.replace(/^m4a-files\//, FLAC_PREFIX).replace(/\.[^.]+$/, '.flac');
+  const flacKey = objectName.replace(/\.[^.]+$/, '.flac');
 
   console.log('[start]', { bucket, objectName, contentType, size, flacKey });
 
@@ -60,15 +62,15 @@ exports.onAudioUploaded = async (event /*, context */) => {
     console.log('[transcoded]', tmpOut);
 
     // 3) Upload FLAC
-    await storage.bucket(bucket).upload(tmpOut, {
+    await storage.bucket(FLAC_TRANSCODES_BUCKET).upload(tmpOut, {
       destination: flacKey,
       contentType: 'audio/flac'
     });
     console.log('[uploaded flac]', flacKey);
 
     // 4) Kick off Speech v2 BatchRecognize (async; do NOT wait)
-    const gcsFlacUri = `gs://${bucket}/${flacKey}`;
-    const outUriPrefix = `gs://${bucket}/${TRANSCRIPTS_PREFIX}`;
+    const gcsFlacUri = `gs://${FLAC_TRANSCODES_BUCKET}/${flacKey}`;
+    const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}`;
 
     const request = {
       recognizer: RECOGNIZER,
@@ -78,7 +80,7 @@ exports.onAudioUploaded = async (event /*, context */) => {
         languageCodes: LANGUAGE_CODES,
         model: SPEECH_MODEL
       },
-      outputConfig: {
+      recognitionOutputConfig: {
         gcsOutputConfig: { uri: outUriPrefix }
       }
     };
@@ -106,7 +108,7 @@ function must(k) {
 
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
-    const p = spawn('/usr/bin/ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let err = '';
     p.stderr.on('data', d => { err += d.toString(); });
     p.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}: ${err}`)));
