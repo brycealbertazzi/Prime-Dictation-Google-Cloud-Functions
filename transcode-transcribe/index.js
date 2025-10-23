@@ -37,15 +37,26 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     await storage.bucket(FLAC_TRANSCODES_BUCKET).upload(tmpOut, { destination: flacKey, contentType: 'audio/flac' });
 
     const gcsFlacUri = `gs://${FLAC_TRANSCODES_BUCKET}/${flacKey}`;
-    const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}`;
+    const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}/`;
 
-    const [operation] = await speech.batchRecognize({
+    console.log('[speech.batchRecognize] ->', {
+      endpoint: 'us-central1-speech.googleapis.com',
       recognizer: RECOGNIZER,
-      files: [{ uri: gcsFlacUri }],
-      config: { autoDecodingConfig: {}, languageCodes: LANGUAGE_CODES, model: SPEECH_MODEL },
-      recognitionOutputConfig: { gcsOutputConfig: { uri: outUriPrefix } },
+      input: gcsFlacUri,
+      output: outUriPrefix
     });
-    console.log('[speech.started]', { operationName: operation.name, input: gcsFlacUri, output: outUriPrefix });
+    try {
+      const [operation] = await speech.batchRecognize({
+        recognizer: RECOGNIZER,
+        files: [{ uri: gcsFlacUri }],
+        config: { autoDecodingConfig: {}, languageCodes: LANGUAGE_CODES, model: SPEECH_MODEL },
+        recognitionOutputConfig: { gcsOutputConfig: { uri: outUriPrefix } }
+      });
+      console.log('[speech.started]', { operationName: operation.name });
+    } catch (e) {
+      console.error('[speech.error]', e?.details || e?.message || e);
+      return; // do not throw; avoids Eventarc retries storm
+    }
   } finally {
     await safeUnlink(tmpIn);
     await safeUnlink(tmpOut);
