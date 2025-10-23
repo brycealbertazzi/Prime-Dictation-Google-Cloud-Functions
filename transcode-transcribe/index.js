@@ -1,6 +1,6 @@
 // transcode-transcribe/index.js
 // Cloud Functions (Gen2) — GCS finalize trigger
-// Flow: raw/<name>.m4a → /tmp → ffmpeg → flac/<name>.flac → Speech v2 (BatchRecognize)
+// Flow: /mp4-files/<name>.m4a → /tmp → ffmpeg → flac/<name>.flac → Speech v2 (BatchRecognize)
 // Speech writes JSON to transcribed-files/… ; a separate txtify function will prettify to .txt
 
 const { Storage } = require('@google-cloud/storage');
@@ -32,12 +32,12 @@ exports.onAudioUploaded = async (event /*, context */) => {
   const { bucket, name: objectName, contentType, size } = event || {};
   if (!bucket || !objectName) return;
   if (bucket !== UPLOAD_BUCKET) return;
-  if (!objectName.startsWith('raw/')) return; // only handle uploads under raw/
+  if (!objectName.startsWith('m4a-files/')) return; // only handle uploads under mp4-files/
 
   const base = path.basename(objectName).replace(/\.[^.]+$/, '');   // "foo"
   const tmpIn  = `/tmp/${base}.m4a`;
   const tmpOut = `/tmp/${base}.flac`;
-  const flacKey = objectName.replace(/^raw\//, FLAC_PREFIX).replace(/\.[^.]+$/, '.flac');
+  const flacKey = objectName.replace(/^m4a-files\//, FLAC_PREFIX).replace(/\.[^.]+$/, '.flac');
 
   console.log('[start]', { bucket, objectName, contentType, size, flacKey });
 

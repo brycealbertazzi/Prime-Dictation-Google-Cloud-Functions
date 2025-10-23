@@ -19,8 +19,8 @@ exports.prettifyTranscribedFile = async (event /*, context */) => {
   console.log('[txtify] new JSON:', { objectName, contentType });
 
   // 1) Download and parse Speech v2 JSON
-  const [raw] = await storage.bucket(bucket).file(objectName).download();
-  const payload = JSON.parse(String(raw));
+  const [m4aFile] = await storage.bucket(bucket).file(objectName).download();
+  const payload = JSON.parse(String(m4aFile));
 
   // 2) Extract transcripts: results[].alternatives[].transcript
   const lines = [];
