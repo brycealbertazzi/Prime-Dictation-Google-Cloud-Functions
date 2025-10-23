@@ -10,7 +10,7 @@ const BUCKET             = process.env.BUCKET_UPLOADS || 'prime-dictation-audio-
 const TRANSCRIPTS_PREFIX = process.env.TRANSCRIPTS_PREFIX || 'transcribed-files/';
 const CREATE_ONLY        = (process.env.CREATE_ONLY || 'false').toLowerCase() === 'true';
 
-exports.onTranscriptJson = async (event /*, context */) => {
+exports.txtify = async (event /*, context */) => {
   const { bucket, name: objectName, contentType } = event || {};
   if (bucket !== BUCKET) return;
   if (!objectName?.startsWith(TRANSCRIPTS_PREFIX)) return;
