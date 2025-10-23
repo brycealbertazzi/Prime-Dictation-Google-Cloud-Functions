@@ -24,7 +24,7 @@ const speech = new SpeechClient();
 const UPLOAD_BUCKET      = must('BUCKET_UPLOADS');
 const RECOGNIZER         = must('RECOGNIZER');
 const TRANSCRIPTS_PREFIX = process.env.TRANSCRIPTS_PREFIX || 'transcribed-files/';
-const FLAC_PREFIX        = process.env.FLAC_PREFIX || 'flac/';
+const FLAC_PREFIX        = process.env.FLAC_PREFIX || 'transcoded-files/';
 const LANGUAGE_CODES     = (process.env.LANGUAGE_CODES || 'en-US').split(',').map(s => s.trim()).filter(Boolean);
 const SPEECH_MODEL       = process.env.SPEECH_MODEL || 'long';
 
