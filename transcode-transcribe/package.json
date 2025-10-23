@@ -1,15 +1,13 @@
 {
-  "name": "pd-transcode-transcribe",
-  "version": "1.0.0",
-  "description": "Transcode .m4a to FLAC and launch Speech-to-Text v2 BatchRecognize.",
-  "main": "index.js",
-  "type": "commonjs",
-  "engines": {
-    "node": ">=20 <23"
-  },
+  "name": "transcode-transcribe",
+  "private": true,
   "dependencies": {
-    "@google-cloud/functions-framework": "^4.0.0",
-    "@google-cloud/speech": "^6.6.0",
-    "@google-cloud/storage": "^7.11.0"
+    "@google-cloud/functions-framework": "^3.4.0",
+    "@google-cloud/speech": "^6.3.0",
+    "@google-cloud/storage": "^7.11.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
+  },
+  "scripts": {
+    "start": "functions-framework --target=onAudioUploaded"
   }
 }
