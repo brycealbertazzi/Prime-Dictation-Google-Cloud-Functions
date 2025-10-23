@@ -26,8 +26,6 @@ const UPLOAD_BUCKET      = must('BUCKET_UPLOADS');
 const FLAC_TRANSCODES_BUCKET    = must('FLAC_TRANSCODES_BUCKET')
 const TXT_TRANSCRIPTS_BUCKET   = must('TXT_TRANSCRIPTS_BUCKET')
 const RECOGNIZER         = must('RECOGNIZER');
-const TRANSCRIPTS_PREFIX = process.env.TRANSCRIPTS_PREFIX || 'transcribed-files/';
-const FLAC_PREFIX        = process.env.FLAC_PREFIX || 'transcoded-files/';
 const LANGUAGE_CODES     = (process.env.LANGUAGE_CODES || 'en-US').split(',').map(s => s.trim()).filter(Boolean);
 const SPEECH_MODEL       = process.env.SPEECH_MODEL || 'long';
 
