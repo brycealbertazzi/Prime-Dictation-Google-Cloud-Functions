@@ -1,6 +1,7 @@
 // Cloud Run service using Functions Framework (Node.js) — CloudEvent handler
 const { Storage } = require('@google-cloud/storage');
 const { SpeechClient } = require('@google-cloud/speech').v2;
+
 const { spawn } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
@@ -8,7 +9,7 @@ const functions = require('@google-cloud/functions-framework');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 const storage = new Storage();
-const speech = new SpeechClient();
+const speech = new SpeechClient({ apiEndpoint: 'us-central1-speech.googleapis.com' });
 
 const UPLOAD_BUCKET = must('BUCKET_UPLOADS');
 const FLAC_TRANSCODES_BUCKET = must('FLAC_TRANSCODES_BUCKET');
