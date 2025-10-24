@@ -85,7 +85,11 @@ functions.http('sign', async (req, res) => {
     const { name } = req.query || {};
     if (!isSafeName(name)) return res.status(400).json({ error: 'bad name' });
 
-    const [url] = await storage.bucket(TXT_BUCKET).file(String(name)).getSignedUrl({
+    const file = storage.bucket(TXT_BUCKET).file(String(name));
+    const [exists] = await file.exists();
+    if (!exists) return res.status(404).json({ error: 'not-found' });
+
+    const [url] = await file.getSignedUrl({
       version: 'v4',
       action: 'read',
       expires: Date.now() + 15 * 60 * 1000,
