@@ -25,23 +25,23 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     if (!isSafeName(name)) { console.log('[skip] unsafe name'); return; }
     if (!name.toLowerCase().endsWith('.json')) { console.log('[skip] not json'); return; }
 
-    const base    = name.replace(/\.json$/i, '');
-    const outName = `${base}.txt`;
-
-    // Idempotency: if .txt already exists, bail (helps with retries)
+    // NEW: derive the exact TXT filename you want
+    const outName = jsonToTxtName(name);
     const outFile = storage.bucket(bucket).file(outName);
+
+    // Idempotency: bail if .txt already exists
     const [exists] = await outFile.exists();
     if (exists) { console.log('[skip] txt already exists', outName); return; }
 
     // Read JSON
     const file = storage.bucket(bucket).file(name);
     const [buf] = await file.download();
+
     let json;
     try { json = JSON.parse(buf.toString('utf8')); }
     catch (e) { console.error('[parse-error]', e?.message); return; }
 
     // Extract transcript text
-    // Speech v2 typical shape: { results: [{ alternatives: [{ transcript, confidence }], ... }] }
     const results = Array.isArray(json?.results) ? json.results : [];
     const parts = [];
     for (const r of results) {
@@ -61,9 +61,20 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     console.log('[wrote]', `gs://${bucket}/${outName}`, `${text.length} bytes`);
   } catch (err) {
     console.error('[unhandled]', err?.stack || err);
-    // Do not rethrow; let Eventarc consider it handled to avoid retry storms.
   }
 });
+
+// Map JSON object name -> desired TXT name (strip STT suffixes like _transcript_<uuid>)
+function jsonToTxtName(jsonName) {
+  // remove leading/trailing spaces just in case
+  const n = String(jsonName).trim();
+
+  const cleanedBase = n
+    .replace(/(_transcript.*)?\.json$/i, '')   // strips "_transcript..." if present
+    .replace(/(_result-\d+)?$/i, '');          // optional: strips "_result-<n>" if present
+
+  return `${cleanedBase}.txt`;
+}
 
 // HTTP: GET /sign?name=<objectName> -> V4 signed URL to download .txt
 functions.http('sign', async (req, res) => {
