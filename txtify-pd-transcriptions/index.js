@@ -1,50 +1,79 @@
-// txtify/index.js
-// Cloud Functions (Gen2) — GCS finalize trigger on transcribed-files/*.json
-// Reads Speech v2 JSON, prettifies into plain text, writes <same>.txt (overwrites by default)
+// Cloud Run service using Functions Framework (Node.js) — CloudEvent + HTTP
+// CE path: finalize of JSON in TXT bucket -> writes <base>.txt
+// HTTP path: GET /sign?name=<objectName> -> returns a v4 signed URL to download the .txt
 
+const functions = require('@google-cloud/functions-framework');
 const { Storage } = require('@google-cloud/storage');
+const path = require('path');
+
 const storage = new Storage();
 
-// Env
-const BUCKET             = process.env.BUCKET_UPLOADS || 'prime-dictation-audio-files';
-const TRANSCRIPTS_PREFIX = process.env.TRANSCRIPTS_PREFIX || 'transcribed-files/';
-const CREATE_ONLY        = (process.env.CREATE_ONLY || 'false').toLowerCase() === 'true';
+const TXT_TRANSCRIPTS_BUCKET = must('TXT_TRANSCRIPTS_BUCKET'); // prime-dictation-txt-files
 
-exports.onAudioTranscribed = async (event /*, context */) => {
-  const { bucket, name: objectName, contentType } = event || {};
-  if (bucket !== BUCKET) return;
-  if (!objectName?.startsWith(TRANSCRIPTS_PREFIX)) return;
-  if (!/\.json$/i.test(objectName)) return;
+// ---- CloudEvent: turn Speech v2 JSON into .txt ----
+functions.cloudEvent('onAudioTranscribed', async (ce) => {
+  const d = ce?.data || {};
+  const bucket = d.bucket;
+  const name   = d.name;
 
-  console.log('[txtify] new JSON:', { objectName, contentType });
+  console.log('[ce]', { type: ce?.type, bucket, name });
+  if (!bucket || !name) return;
+  if (bucket !== TXT_TRANSCRIPTS_BUCKET) { console.log('[skip] different bucket'); return; }
+  if (!name.toLowerCase().endsWith('.json')) { console.log('[skip] not json'); return; }
 
-  // 1) Download and parse Speech v2 JSON
-  const [m4aFile] = await storage.bucket(bucket).file(objectName).download();
-  const payload = JSON.parse(String(m4aFile));
+  // Read JSON
+  const file = storage.bucket(bucket).file(name);
+  const [buf] = await file.download();
+  let json;
+  try { json = JSON.parse(buf.toString('utf8')); }
+  catch (e) { console.error('[parse-error]', e?.message); return; }
 
-  // 2) Extract transcripts: results[].alternatives[].transcript
-  const lines = [];
-  for (const r of payload.results ?? []) {
-    for (const a of r.alternatives ?? []) {
-      if (a.transcript) lines.push(a.transcript);
-    }
+  // Extract text from Speech v2 result(s)
+  // Handles {results:[{alternatives:[{transcript,confidence}], ...}]}
+  const results = Array.isArray(json?.results) ? json.results : [];
+  const pieces = [];
+  for (const r of results) {
+    const alt = Array.isArray(r?.alternatives) ? r.alternatives[0] : null;
+    if (alt?.transcript) pieces.push(alt.transcript.trim());
   }
+  const text = pieces.join('\n\n').trim();
+  if (!text) { console.log('[skip] empty transcript'); return; }
 
-  // 3) Light prettify: trim/collapse whitespace; join with newlines
-  const pretty = lines
-    .map(s => s.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n');
+  // Derive output name: replace only trailing ".json" with ".txt"
+  const base = name.replace(/\.json$/i, '');
+  const outName = `${base}.txt`;
 
-  // 4) Write .txt next to the JSON (overwrite by default)
-  const txtName = objectName.replace(/\.json$/i, '.txt');
-  const file = storage.bucket(bucket).file(txtName);
-
-  const saveOpts = {
+  await storage.bucket(bucket).file(outName).save(text, {
+    resumable: false,
     contentType: 'text/plain; charset=utf-8',
-    ...(CREATE_ONLY ? { preconditionOpts: { ifGenerationMatch: 0 } } : {})
-  };
+    metadata: { cacheControl: 'no-cache' }
+  });
 
-  await file.save(pretty, saveOpts);
-  console.log('[txtify] wrote:', txtName, { bytes: Buffer.byteLength(pretty, 'utf8'), overwrite: !CREATE_ONLY });
-};
+  console.log('[wrote]', `gs://${bucket}/${outName}`, `${text.length} bytes`);
+});
+
+// ---- HTTP: mint a V4 signed URL so your iOS app can fetch the .txt ----
+// Call: GET /sign?name=<objectName>
+functions.http('sign', async (req, res) => {
+  try {
+    const { name } = req.query || {};
+    if (!name || typeof name !== 'string') {
+      res.status(400).json({ error: 'missing ?name=' }); return;
+    }
+    const [url] = await storage
+      .bucket(TXT_TRANSCRIPTS_BUCKET)
+      .file(name)
+      .getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + 15 * 60 * 1000, // 15 min
+        responseDisposition: `attachment; filename="${path.basename(name)}"`
+      });
+    res.json({ url });
+  } catch (e) {
+    console.error('[sign.error]', e?.message || e);
+    res.status(500).json({ error: 'signing-failed' });
+  }
+});
+
+function must(k){ const v=process.env[k]; if(!v) throw new Error(`Missing env ${k}`); return v; }
