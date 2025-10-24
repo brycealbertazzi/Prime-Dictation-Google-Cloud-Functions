@@ -2,10 +2,15 @@
   "name": "pd-txtify",
   "version": "1.0.0",
   "description": "Prettify Speech v2 JSON transcripts into .txt files.",
+  "private": true,
   "main": "index.js",
   "type": "commonjs",
   "engines": { "node": ">=20" },
   "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.0",
     "@google-cloud/storage": "^7.11.0"
+  },
+  "scripts": {
+    "start": "functions-framework --target=onAudioTranscribed"
   }
 }
