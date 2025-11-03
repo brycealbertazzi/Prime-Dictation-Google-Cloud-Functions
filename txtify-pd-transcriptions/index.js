@@ -29,10 +29,6 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     const outName = jsonToTxtName(name);
     const outFile = storage.bucket(bucket).file(outName);
 
-    // Idempotency: bail if .txt already exists
-    const [exists] = await outFile.exists();
-    if (exists) { console.log('[skip] txt already exists', outName); return; }
-
     // Read JSON
     const file = storage.bucket(bucket).file(name);
     const [buf] = await file.download();
@@ -54,7 +50,8 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     await outFile.save(text, {
       resumable: false,
       contentType: 'text/plain; charset=utf-8',
-      metadata: { cacheControl: 'no-cache' }
+      metadata: { cacheControl: 'no-cache' },
+      ifGenerationMatch: 0, // create-only; avoids an extra exists() call
     });
     console.log("STEP 4) converted .json to .txt file")
 
