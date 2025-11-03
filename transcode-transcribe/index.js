@@ -33,18 +33,15 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
 
   try {
     await storage.bucket(bucket).file(objectName).download({ destination: tmpIn });
+    console.log("fetched .m4a from bucket")
     await runFfmpeg(['-y','-i', tmpIn,'-ac','1','-ar','16000','-sample_fmt','s16','-vn','-c:a','flac', tmpOut]);
+    console.log("STEP 1) transcoded.m4a")
     await storage.bucket(FLAC_TRANSCODES_BUCKET).upload(tmpOut, { destination: flacKey, contentType: 'audio/flac' });
+    console.log("STEP 2) Uploaded flac file to FLAC bucket")
 
     const gcsFlacUri = `gs://${FLAC_TRANSCODES_BUCKET}/${flacKey}`;
     const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}/`;
 
-    console.log('[speech.batchRecognize] ->', {
-      endpoint: 'us-central1-speech.googleapis.com',
-      recognizer: RECOGNIZER,
-      input: gcsFlacUri,
-      output: outUriPrefix
-    });
     try {
       const [operation] = await speech.batchRecognize({
         recognizer: RECOGNIZER,
@@ -53,6 +50,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
         recognitionOutputConfig: { gcsOutputConfig: { uri: outUriPrefix } }
       });
       console.log('[speech.started]', { operationName: operation.name });
+      console.log("STEP 3) added transcribed file to txt bucket")
     } catch (e) {
       console.error('[speech.error]', e?.details || e?.message || e);
       return; // do not throw; avoids Eventarc retries storm

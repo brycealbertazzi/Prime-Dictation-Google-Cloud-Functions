@@ -95,6 +95,7 @@ functions.http('sign', async (req, res) => {
       expires: Date.now() + 15 * 60 * 1000,
       responseDisposition: `attachment; filename="${path.basename(String(name))}"`
     });
+    console.log("STEP 4) txtified and returned transcribed txt file")
 
     res.json({ url });
   } catch (e) {
