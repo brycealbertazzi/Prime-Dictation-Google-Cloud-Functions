@@ -50,7 +50,6 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
       if (t) parts.push(t);
     }
     const text = parts.join('\n\n').trim();
-    if (!text) { console.log('[skip] empty transcript'); return; }
 
     await outFile.save(text, {
       resumable: false,
