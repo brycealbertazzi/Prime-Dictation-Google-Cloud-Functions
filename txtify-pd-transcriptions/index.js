@@ -53,7 +53,6 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
       metadata: { cacheControl: 'no-cache' },
       ifGenerationMatch: 0, // create-only; avoids an extra exists() call
     });
-    console.log("STEP 4) converted .json to .txt file")
 
     console.log('[wrote]', `gs://${bucket}/${outName}`, `${text.length} bytes`);
   } catch (err) {
@@ -92,7 +91,6 @@ functions.http('sign', async (req, res) => {
       expires: Date.now() + 15 * 60 * 1000,
       responseDisposition: `attachment; filename="${path.basename(String(name))}"`
     });
-    console.log("STEP 5) returned signed URL to download .txt")
 
     res.json({ url });
   } catch (e) {
