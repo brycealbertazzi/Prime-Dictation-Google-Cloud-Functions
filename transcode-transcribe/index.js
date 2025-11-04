@@ -69,7 +69,11 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
         const t = alt0?.transcript?.trim();
         if (t) parts.push(t);
       }
-      const text = parts.join('\n\n').trim();
+      
+      let text = parts.join('\n\n').trim();
+      if (!text || text.length <= 0) {
+        text = "[Empty transcript]"
+      }
 
       const outName = `${base}.txt`;
       await time('write.txt', () =>
