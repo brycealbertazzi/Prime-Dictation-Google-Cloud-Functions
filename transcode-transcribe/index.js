@@ -15,11 +15,13 @@ const UPLOAD_BUCKET = must('BUCKET_UPLOADS');
 const FLAC_TRANSCODES_BUCKET = must('FLAC_TRANSCODES_BUCKET');
 const TXT_TRANSCRIPTS_BUCKET = must('TXT_TRANSCRIPTS_BUCKET');
 const RECOGNIZER = must('RECOGNIZER');
-const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US').split(',').map(s => s.trim()).filter(Boolean);
+const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
-// models: let you keep your current 'long' for batch, and a faster 'short' for sync
-const SPEECH_MODEL_LONG  = process.env.SPEECH_MODEL_LONG  || 'long';
-const SPEECH_MODEL_SHORT = process.env.SPEECH_MODEL_SHORT || 'short';
+// models: keep the SAME model for both paths for consistent quality
+const SPEECH_MODEL = process.env.SPEECH_MODEL || 'latest_long'; // ★ use same model sync & batch
 
 // threshold (seconds) under which we use sync recognize
 const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '300'); // default 5 min
@@ -45,20 +47,32 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const seconds = await probeDurationSec(tmpIn);
     log('[probe.duration]', { seconds });
 
-    // Transcode to FLAC (mono/16k) for consistent recognition
+    // Transcode to FLAC (mono) for consistent recognition (keep source sample rate) ★
     await time('ffmpeg.transcode->flac', () =>
-      runFfmpeg(['-y','-i', tmpIn,'-ac','1','-ar','16000','-sample_fmt','s16','-vn','-c:a','flac', tmpOut])
+      runFfmpeg(['-y','-i', tmpIn, '-ac','1', '-sample_fmt','s16', '-vn', '-c:a','flac', tmpOut])
     );
+    // If one channel is consistently cleaner, you can map it instead of averaging:
+    // runFfmpeg(['-y','-i', tmpIn, '-map_channel','0.0.0', '-ac','1', '-sample_fmt','s16','-vn','-c:a','flac', tmpOut]);
 
     if (seconds <= SYNC_MAX_SECONDS) {
       // ---- SYNC PATH (short audio): call recognize, write .txt directly ----
       log('[stt.sync] starting recognize()');
 
       const audioB64 = (await fs.readFile(tmpOut)).toString('base64');
+
+      // Make config identical to batch: same model, language codes, punctuation ★
+      const config = {
+        autoDecodingConfig: {},
+        languageCodes: LANGUAGE_CODES,
+        model: SPEECH_MODEL,
+        features: { enableAutomaticPunctuation: true }, // ★ punctuation helps WER & readability
+        // You can also add phrase sets here if you used them in batch (v2 hint sets)
+      };
+
       const [resp] = await time('speech.recognize', () =>
         speech.recognize({
           recognizer: RECOGNIZER,
-          config: { autoDecodingConfig: {}, languageCodes: LANGUAGE_CODES, model: SPEECH_MODEL_SHORT },
+          config,
           content: audioB64,
         })
       );
@@ -69,10 +83,10 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
         const t = alt0?.transcript?.trim();
         if (t) parts.push(t);
       }
-      
+
       let text = parts.join('\n\n').trim();
       if (!text || text.length <= 0) {
-        text = "[Empty transcript]"
+        text = "[Empty transcript]";
       }
 
       const outName = `${base}.txt`;
@@ -86,7 +100,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       );
       log('[stt.sync.done]', { txt: `gs://${TXT_TRANSCRIPTS_BUCKET}/${outName}`, bytes: text.length });
 
-      // (Optional) If you still want the FLAC archived, uncomment:
+      // (Optional) archive FLAC:
       // await storage.bucket(FLAC_TRANSCODES_BUCKET).upload(tmpOut, { destination: flacKey, contentType: 'audio/flac' });
 
     } else {
@@ -98,12 +112,20 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       const gcsFlacUri = `gs://${FLAC_TRANSCODES_BUCKET}/${flacKey}`;
       const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}/`;
 
+      // Config matches sync path ★
+      const config = {
+        autoDecodingConfig: {},
+        languageCodes: LANGUAGE_CODES,
+        model: SPEECH_MODEL,
+        features: { enableAutomaticPunctuation: true }, // ★
+      };
+
       try {
         const [operation] = await time('speech.batchRecognize.start', () =>
           speech.batchRecognize({
             recognizer: RECOGNIZER,
             files: [{ uri: gcsFlacUri }],
-            config: { autoDecodingConfig: {}, languageCodes: LANGUAGE_CODES, model: SPEECH_MODEL_LONG },
+            config,
             recognitionOutputConfig: { gcsOutputConfig: { uri: outUriPrefix } }
           })
         );
@@ -111,7 +133,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
         // Eventarc will trigger your txtify service when JSON lands
       } catch (e) {
         console.error('[speech.error]', e?.details || e?.message || e);
-        return; // do not throw; avoids Eventarc retries storm
+        return; // avoid Eventarc retry storms
       }
     }
   } finally {
@@ -153,7 +175,6 @@ async function probeDurationSec(inputPath){
       const h = Number(m[1]), min = Number(m[2]), s = Number(m[3]);
       resolve(h*3600 + min*60 + s);
     });
-    // safety timeout (rare)
     setTimeout(() => { try{ p.kill('SIGKILL'); }catch{} }, 5000);
   });
 }
