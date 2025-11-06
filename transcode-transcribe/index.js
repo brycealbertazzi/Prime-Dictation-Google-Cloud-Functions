@@ -24,8 +24,8 @@ const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US')
 const SPEECH_MODEL_LONG = process.env.SPEECH_MODEL_LONG || 'latest_long';
 const SPEECH_MODEL_SHORT = process.env.SPEECH_MODEL_SHORT || 'latest_short';
 
-// sync threshold (Google sync limit is ~60s; keep under that)
-const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '59'); // default 59s
+// sync threshold (Google sync limit is ~60s; keep under that). Will set to 20s, we strongly prefer the batchRecognize
+const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '20');
 
 // pause-detection tuning
 const LONG_PAUSE_SECS = Number(process.env.LONG_PAUSE_SECS || '3');   // silence duration to trigger long model
