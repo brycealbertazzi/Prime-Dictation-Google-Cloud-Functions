@@ -20,12 +20,16 @@ const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US')
   .map(s => s.trim())
   .filter(Boolean);
 
-// models: keep the SAME model for both paths for consistent quality
+// models
 const SPEECH_MODEL_LONG = process.env.SPEECH_MODEL_LONG || 'latest_long';
 const SPEECH_MODEL_SHORT = process.env.SPEECH_MODEL_SHORT || 'latest_short';
 
-// threshold (seconds) under which we use sync recognize
+// sync threshold (Google sync limit is ~60s; keep under that)
 const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '59'); // default 59s
+
+// pause-detection tuning
+const LONG_PAUSE_SECS = Number(process.env.LONG_PAUSE_SECS || '3');   // silence duration to trigger long model
+const LONG_PAUSE_DB = Number(process.env.LONG_PAUSE_DB || '-40');     // threshold decibel level for silence
 
 functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
   const { bucket, name: objectName, contentType, size } = cloudevent?.data || {};
@@ -48,7 +52,13 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const seconds = await probeDurationSec(tmpIn);
     log('[probe.duration]', { seconds });
 
-    // Transcode to FLAC (mono) for consistent recognition (keep source sample rate) ★
+    // Detect if there is a long pause (>= LONG_PAUSE_SECS @ LONG_PAUSE_DB dB)
+    const longPause = Number.isFinite(seconds)
+      ? await hasLongPause(tmpIn, LONG_PAUSE_SECS, LONG_PAUSE_DB)
+      : false;
+    log('[probe.pause]', { longPause, thresholdDb: LONG_PAUSE_DB, minSeconds: LONG_PAUSE_SECS });
+
+    // Transcode to FLAC (mono) for consistent recognition (keep source sample rate)
     await time('ffmpeg.transcode->flac', () =>
       runFfmpeg([
         '-hide_banner','-loglevel','error',
@@ -63,19 +73,24 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       ])
     );
 
-    if (seconds <= SYNC_MAX_SECONDS) {
+    // Only use sync if duration is finite and under the hard cap
+    const useSync = Number.isFinite(seconds) && seconds <= SYNC_MAX_SECONDS;
+
+    if (useSync) {
       // ---- SYNC PATH (short audio): call recognize, write .txt directly ----
+      // Choose model based on pause detection to avoid endpointing issues
+      const modelForSync = longPause ? SPEECH_MODEL_LONG : SPEECH_MODEL_SHORT;
+      log('[model.select.sync]', { model: modelForSync, seconds, longPause });
+
       log('[stt.sync] starting recognize()');
 
       const audioB64 = (await fs.readFile(tmpOut)).toString('base64');
 
-      // Make config identical to batch: same model, language codes, punctuation ★
       const config = {
         autoDecodingConfig: {},
         languageCodes: LANGUAGE_CODES,
-        model: SPEECH_MODEL_SHORT,
-        features: { enableAutomaticPunctuation: true }, // ★ punctuation helps WER & readability
-        // You can also add phrase sets here if you used them in batch (v2 hint sets)
+        model: modelForSync,
+        features: { enableAutomaticPunctuation: true },
       };
 
       const [resp] = await time('speech.recognize', () =>
@@ -121,12 +136,11 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       const gcsFlacUri = `gs://${FLAC_TRANSCODES_BUCKET}/${flacKey}`;
       const outUriPrefix = `gs://${TXT_TRANSCRIPTS_BUCKET}/`;
 
-      // Config matches sync path ★
       const config = {
         autoDecodingConfig: {},
         languageCodes: LANGUAGE_CODES,
         model: SPEECH_MODEL_LONG,
-        features: { enableAutomaticPunctuation: true }, // ★
+        features: { enableAutomaticPunctuation: true },
       };
 
       try {
@@ -185,6 +199,25 @@ async function probeDurationSec(inputPath){
       resolve(h*3600 + min*60 + s);
     });
     setTimeout(() => { try{ p.kill('SIGKILL'); }catch{} }, 5000);
+  });
+}
+
+// Detect if any silence period >= minSeconds at/below thresholdDb dB exists
+async function hasLongPause(inputPath, minSeconds = 3, thresholdDb = -40){
+  return new Promise((resolve) => {
+    const args = [
+      '-hide_banner','-nostats','-i', inputPath,
+      '-af', `silencedetect=n=${thresholdDb}dB:d=${minSeconds}`,
+      '-f','null','-'
+    ];
+    const p = spawn(ffmpegPath, args, { stdio: ['ignore','ignore','pipe'] });
+    let stderr = '';
+    p.stderr.on('data', d => { stderr += d.toString(); });
+    p.on('close', () => {
+      // ffmpeg prints "silence_start: <t>" when it detects a segment
+      resolve(/silence_start:\s*\d+(\.\d+)?/i.test(stderr));
+    });
+    setTimeout(() => { try { p.kill('SIGKILL'); } catch {} }, 15000);
   });
 }
 
