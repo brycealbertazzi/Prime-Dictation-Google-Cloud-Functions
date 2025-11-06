@@ -24,7 +24,7 @@ const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US')
 const SPEECH_MODEL = process.env.SPEECH_MODEL || 'latest_long'; // ★ use same model sync & batch
 
 // threshold (seconds) under which we use sync recognize
-const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '300'); // default 5 min
+const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '59'); // default 59s
 
 functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
   const { bucket, name: objectName, contentType, size } = cloudevent?.data || {};
