@@ -50,10 +50,18 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
 
     // Transcode to FLAC (mono) for consistent recognition (keep source sample rate) ★
     await time('ffmpeg.transcode->flac', () =>
-      runFfmpeg(['-y','-i', tmpIn, '-ac','1', '-sample_fmt','s16', '-vn', '-c:a','flac', tmpOut])
+      runFfmpeg([
+        '-hide_banner','-loglevel','error',
+        '-y','-i', tmpIn,
+        '-ac','1',                 // mono
+        '-sample_fmt','s16',       // 16-bit PCM (good for FLAC + ASR)
+        '-vn',                     // no video
+        '-map_metadata','-1',      // drop metadata; keeps payload minimal
+        '-c:a','flac',
+        '-compression_level','5',  // FLAC default; 5–8 is fine (trade CPU vs size)
+        tmpOut
+      ])
     );
-    // If one channel is consistently cleaner, you can map it instead of averaging:
-    // runFfmpeg(['-y','-i', tmpIn, '-map_channel','0.0.0', '-ac','1', '-sample_fmt','s16','-vn','-c:a','flac', tmpOut]);
 
     if (seconds <= SYNC_MAX_SECONDS) {
       // ---- SYNC PATH (short audio): call recognize, write .txt directly ----
