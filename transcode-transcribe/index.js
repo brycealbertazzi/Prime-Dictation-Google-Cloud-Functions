@@ -27,12 +27,14 @@ const SPEECH_MODEL = process.env.SPEECH_MODEL || 'latest_long';
 const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '30');
 
 functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
-  const { bucket, name: objectName, contentType, size } = cloudevent?.data || {};
-  log('[cloudevent]', { type: cloudevent?.type, bucket, objectName, contentType, size });
+  const { bucket, name: objectName, contentType, size, generation, metageneration } = cloudevent?.data || {};
+  log('[cloudevent]', { type: cloudevent?.type, bucket, objectName, contentType, size, generation, metageneration });
 
   if (!bucket || !objectName) return;
   if (bucket !== UPLOAD_BUCKET) return;
 
+  // IMPORTANT: pin to this event’s generation so we never read an older blob with the same name.
+  const fileRef = storage.bucket(bucket).file(objectName, { generation });
   const base = path.basename(objectName).replace(/\.[^.]+$/, '');
   const tmpIn  = `/tmp/${base}.m4a`;
   const tmpOut = `/tmp/${base}.flac`;
@@ -40,7 +42,8 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
 
   try {
     await time('download.m4a', () =>
-      storage.bucket(bucket).file(objectName).download({ destination: tmpIn })
+      // pin to generation (exact version from the event)
+      fileRef.download({ destination: tmpIn })
     );
 
     // Probe duration (from the original file)
@@ -66,7 +69,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const useSync = Number.isFinite(seconds) && seconds <= SYNC_MAX_SECONDS;
 
     if (useSync) {
-      log('[stt.sync] starting recognize()');
+      log('[stt.sync] starting recognize()', { model: SPEECH_MODEL });
 
       const audioB64 = (await fs.readFile(tmpOut)).toString('base64');
 
@@ -98,14 +101,32 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       }
 
       const outName = `${base}.txt`;
-      await time('write.txt', () =>
-        storage.bucket(TXT_TRANSCRIPTS_BUCKET).file(outName).save(text, {
+      const finalFile = storage.bucket(TXT_TRANSCRIPTS_BUCKET).file(outName);
+      const tmpTxt = storage.bucket(TXT_TRANSCRIPTS_BUCKET).file(`tmp/${outName}.partial`);
+
+      // --- Atomic write: temp → promote (prevents stale reads) ---
+      await time('write.txt.temp', () =>
+        tmpTxt.save(text, {
           resumable: false,
           contentType: 'text/plain; charset=utf-8',
           metadata: { cacheControl: 'no-cache' },
-          ifGenerationMatch: 0, // create-only idempotency
+          ifGenerationMatch: 0, // create-only temp
         })
       );
+
+      // delete any previous final (ignore if missing)
+      await time('write.txt.delete-old', async () => {
+        try { await finalFile.delete(); } catch { /* ignore */ }
+      });
+
+      // promote: copy temp → final
+      await time('write.txt.promote', () => tmpTxt.copy(finalFile));
+
+      // cleanup temp
+      await time('write.txt.cleanup', async () => {
+        try { await tmpTxt.delete(); } catch { /* ignore */ }
+      });
+
       log('[stt.sync.done]', { txt: `gs://${TXT_TRANSCRIPTS_BUCKET}/${outName}`, bytes: text.length });
 
       // (Optional) archive FLAC:
