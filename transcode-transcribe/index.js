@@ -29,7 +29,7 @@ const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '59'); // defaul
 
 // pause-detection tuning
 const LONG_PAUSE_SECS = Number(process.env.LONG_PAUSE_SECS || '3');   // silence duration to trigger long model
-const LONG_PAUSE_DB = Number(process.env.LONG_PAUSE_DB || '-40');     // threshold decibel level for silence
+const SILENCE_DECIBEL_THRESHOLD = Number(process.env.SILENCE_DECIBEL_THRESHOLD || '-40');     // threshold decibel level for silence
 
 functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
   const { bucket, name: objectName, contentType, size } = cloudevent?.data || {};
@@ -52,11 +52,11 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const seconds = await probeDurationSec(tmpIn);
     log('[probe.duration]', { seconds });
 
-    // Detect if there is a long pause (>= LONG_PAUSE_SECS @ LONG_PAUSE_DB dB)
+    // Detect if there is a long pause (>= LONG_PAUSE_SECS @ SILENCE_DECIBEL_THRESHOLD dB)
     const longPause = Number.isFinite(seconds)
-      ? await hasLongPause(tmpIn, LONG_PAUSE_SECS, LONG_PAUSE_DB)
+      ? await hasLongPause(tmpIn, LONG_PAUSE_SECS, SILENCE_DECIBEL_THRESHOLD)
       : false;
-    log('[probe.pause]', { longPause, thresholdDb: LONG_PAUSE_DB, minSeconds: LONG_PAUSE_SECS });
+    log('[probe.pause]', { longPause, thresholdDb: SILENCE_DECIBEL_THRESHOLD, minSeconds: LONG_PAUSE_SECS });
 
     // Transcode to FLAC (mono) for consistent recognition (keep source sample rate)
     await time('ffmpeg.transcode->flac', () =>
