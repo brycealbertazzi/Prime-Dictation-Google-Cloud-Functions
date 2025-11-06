@@ -21,15 +21,10 @@ const LANGUAGE_CODES = (process.env.LANGUAGE_CODES || 'en-US')
   .filter(Boolean);
 
 // models
-const SPEECH_MODEL_LONG = process.env.SPEECH_MODEL_LONG || 'latest_long';
-const SPEECH_MODEL_SHORT = process.env.SPEECH_MODEL_SHORT || 'latest_short';
+const SPEECH_MODEL = process.env.SPEECH_MODEL || 'latest_long';
 
-// sync threshold (Google sync limit is ~60s; keep under that). Will set to 20s, we strongly prefer the batchRecognize
-const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '20');
-
-// pause-detection tuning
-const LONG_PAUSE_SECS = Number(process.env.LONG_PAUSE_SECS || '3');   // silence duration to trigger long model
-const SILENCE_DECIBEL_THRESHOLD = Number(process.env.SILENCE_DECIBEL_THRESHOLD || '-40');     // threshold decibel level for silence
+// sync threshold (Google sync limit is ~60s; keep under that).
+const SYNC_MAX_SECONDS = Number(process.env.SYNC_MAX_SECONDS || '30');
 
 functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
   const { bucket, name: objectName, contentType, size } = cloudevent?.data || {};
@@ -52,12 +47,6 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const seconds = await probeDurationSec(tmpIn);
     log('[probe.duration]', { seconds });
 
-    // Detect if there is a long pause (>= LONG_PAUSE_SECS @ SILENCE_DECIBEL_THRESHOLD dB)
-    const longPause = Number.isFinite(seconds)
-      ? await hasLongPause(tmpIn, LONG_PAUSE_SECS, SILENCE_DECIBEL_THRESHOLD)
-      : false;
-    log('[probe.pause]', { longPause, thresholdDb: SILENCE_DECIBEL_THRESHOLD, minSeconds: LONG_PAUSE_SECS });
-
     // Transcode to FLAC (mono) for consistent recognition (keep source sample rate)
     await time('ffmpeg.transcode->flac', () =>
       runFfmpeg([
@@ -77,11 +66,6 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
     const useSync = Number.isFinite(seconds) && seconds <= SYNC_MAX_SECONDS;
 
     if (useSync) {
-      // ---- SYNC PATH (short audio): call recognize, write .txt directly ----
-      // Choose model based on pause detection to avoid endpointing issues
-      const modelForSync = longPause ? SPEECH_MODEL_LONG : SPEECH_MODEL_SHORT;
-      log('[model.select.sync]', { model: modelForSync, seconds, longPause });
-
       log('[stt.sync] starting recognize()');
 
       const audioB64 = (await fs.readFile(tmpOut)).toString('base64');
@@ -89,7 +73,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       const config = {
         autoDecodingConfig: {},
         languageCodes: LANGUAGE_CODES,
-        model: modelForSync,
+        model: SPEECH_MODEL,
         features: { enableAutomaticPunctuation: true },
       };
 
@@ -139,7 +123,7 @@ functions.cloudEvent('onAudioUploaded', async (cloudevent) => {
       const config = {
         autoDecodingConfig: {},
         languageCodes: LANGUAGE_CODES,
-        model: SPEECH_MODEL_LONG,
+        model: SPEECH_MODEL,
         features: { enableAutomaticPunctuation: true },
       };
 
@@ -199,25 +183,6 @@ async function probeDurationSec(inputPath){
       resolve(h*3600 + min*60 + s);
     });
     setTimeout(() => { try{ p.kill('SIGKILL'); }catch{} }, 5000);
-  });
-}
-
-// Detect if any silence period >= minSeconds at/below thresholdDb dB exists
-async function hasLongPause(inputPath, minSeconds = 3, thresholdDb = -40){
-  return new Promise((resolve) => {
-    const args = [
-      '-hide_banner','-nostats','-i', inputPath,
-      '-af', `silencedetect=n=${thresholdDb}dB:d=${minSeconds}`,
-      '-f','null','-'
-    ];
-    const p = spawn(ffmpegPath, args, { stdio: ['ignore','ignore','pipe'] });
-    let stderr = '';
-    p.stderr.on('data', d => { stderr += d.toString(); });
-    p.on('close', () => {
-      // ffmpeg prints "silence_start: <t>" when it detects a segment
-      resolve(/silence_start:\s*\d+(\.\d+)?/i.test(stderr));
-    });
-    setTimeout(() => { try { p.kill('SIGKILL'); } catch {} }, 15000);
   });
 }
 
