@@ -48,7 +48,10 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     
     let text = parts.join('\n\n').trim();
     if (!text || text.length <= 0) {
-      text = "[Empty transcript]"
+      text = "[Empty transcript]";
+    } else {
+      // Condense new lines into spaces
+      text = text.replace(/\s*\n+\s*/g, ' ');
     }
 
     await outFile.save(text, {
