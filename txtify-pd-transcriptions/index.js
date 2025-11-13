@@ -19,7 +19,7 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     const bucket = d.bucket;
     const name   = d.name;
 
-    log('[ce]', { type: ce?.type, bucket, name });
+    console.log('[ce]', { type: ce?.type, bucket, name });
     if (!bucket || !name) return;
     if (bucket !== TXT_BUCKET) { console.log('[skip] different bucket'); return; }
     if (!isSafeName(name)) { console.log('[skip] unsafe name'); return; }
@@ -47,102 +47,8 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     }
     
     let text = parts.join('\n\n').trim();
-    log('Incoming transcript', { length: text.length, sample: text.slice(0, 200) });
     if (!text || text.length <= 0) {
       text = "[Empty transcript]";
-    } else {
-      text = normalizeTranscript(text)
-    }
-
-    /**
-     * Normalize a transcript string:
-     * - Condenses all newlines to spaces
-     * - Converts spoken punctuation to symbols (., , ? ! : ;)
-     *   * Skips conversion if preceded by the word "literal"
-     *   * Attaches punctuation to the previous token (no extra space)
-     * - Cleans up spaces around punctuation
-    */
-    function normalizeTranscript(text) {
-      text = String(text || '').trim();
-      if (!text) return '[Empty transcript]';
-
-      // 1) Condense any kind of newline to a single space, then collapse spaces
-      text = text
-        .replace(/\s*(?:\r\n|\r|\n|\u2028|\u2029)+\s*/g, ' ')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-
-      // 2) Spoken punctuation pass (idempotent + "literal" escape)
-      const toks = text.split(/\s+/);
-      const out = [];
-      const lower = (s) => (s || '').toLowerCase();
-      const peek = (i) => (i < toks.length ? toks[i] : null);
-
-      const attach = (symbol) => {
-        if (out.length) {
-          if (!out[out.length - 1].endsWith(symbol)) {
-            out[out.length - 1] = out[out.length - 1] + symbol;
-          }
-        } else {
-          out.push(symbol);
-        }
-      };
-
-      const dropLiteralAndKeep = (word) => {
-        out.pop();        // drop "literal"
-        out.push(word);   // keep the spoken word as-is
-      };
-
-      for (let i = 0; i < toks.length; i++) {
-        const cur = toks[i];
-        const curL = lower(cur);
-        const prevWord = out.length ? out[out.length - 1] : '';
-        const prevIsLiteral = lower(prevWord) === 'literal';
-        const next = peek(i + 1);
-        const nextL = lower(next);
-
-        // Two-word phrases
-        if (curL === 'question' && nextL === 'mark') {
-          if (prevIsLiteral) {
-            dropLiteralAndKeep(cur);
-            i += 1; out.push(next);
-          } else {
-            attach('?'); i += 1;
-          }
-          continue;
-        }
-        if (curL === 'exclamation' && (nextL === 'mark' || nextL === 'point')) {
-          if (prevIsLiteral) {
-            dropLiteralAndKeep(cur);
-            i += 1; out.push(next);
-          } else {
-            attach('!'); i += 1;
-          }
-          continue;
-        }
-
-        // One-word punctuation
-        if (['period', 'comma', 'colon', 'semicolon'].includes(curL)) {
-          if (prevIsLiteral) {
-            dropLiteralAndKeep(cur);
-          } else {
-            const map = { period: '.', comma: ',', colon: ':', semicolon: ';' };
-            attach(map[curL]);
-          }
-          continue;
-        }
-
-        // Default
-        out.push(cur);
-      }
-
-      // 3) Rebuild and tidy spacing around punctuation
-      let normalized = out.join(' ');
-      normalized = normalized.replace(/\s+([.,!?;:])/g, '$1');      // no space before
-      normalized = normalized.replace(/([.,!?;:])([^\s"'\)\]}])/g, '$1 $2'); // space after
-      normalized = normalized.replace(/\s{2,}/g, ' ').trim();
-
-      return normalized || '[Empty transcript]';
     }
 
     outFile.save(text, {
@@ -168,9 +74,6 @@ function jsonToTxtName(jsonName) {
 
   return `${cleanedBase}.txt`;
 }
-
-function nowISO(){ return new Date().toISOString(); }
-function log(msg, obj){ obj ? console.log(`${nowISO()} ${msg}`, obj) : console.log(`${nowISO()} ${msg}`); }
 
 // HTTP: GET /sign?name=<objectName> -> V4 signed URL to download .txt
 functions.http('sign', async (req, res) => {
