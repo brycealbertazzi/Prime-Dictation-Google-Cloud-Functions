@@ -47,7 +47,7 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     }
     
     let text = parts.join('\n\n').trim();
-    log('INFO', 'Incoming transcript', { length: text.length, sample: text.slice(0, 200) });
+    log('Incoming transcript', { length: text.length, sample: text.slice(0, 200) });
     if (!text || text.length <= 0) {
       text = "[Empty transcript]";
     } else {
