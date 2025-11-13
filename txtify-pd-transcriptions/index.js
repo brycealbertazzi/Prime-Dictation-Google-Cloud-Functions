@@ -19,7 +19,7 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
     const bucket = d.bucket;
     const name   = d.name;
 
-    console.log('[ce]', { type: ce?.type, bucket, name });
+    log('[ce]', { type: ce?.type, bucket, name });
     if (!bucket || !name) return;
     if (bucket !== TXT_BUCKET) { console.log('[skip] different bucket'); return; }
     if (!isSafeName(name)) { console.log('[skip] unsafe name'); return; }
@@ -145,7 +145,6 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
       return normalized || '[Empty transcript]';
     }
 
-
     outFile.save(text, {
       resumable: false,
       contentType: 'text/plain; charset=utf-8',
@@ -153,7 +152,6 @@ functions.cloudEvent('onAudioTranscribed', async (ce) => {
       ifGenerationMatch: 0, // create-only; avoids an extra exists() call
     });
 
-    console.log('[wrote]', `gs://${bucket}/${outName}`, `${text.length} bytes`);
   } catch (err) {
     console.error('[unhandled]', err?.stack || err);
   }
@@ -170,6 +168,9 @@ function jsonToTxtName(jsonName) {
 
   return `${cleanedBase}.txt`;
 }
+
+function nowISO(){ return new Date().toISOString(); }
+function log(msg, obj){ obj ? console.log(`${nowISO()} ${msg}`, obj) : console.log(`${nowISO()} ${msg}`); }
 
 // HTTP: GET /sign?name=<objectName> -> V4 signed URL to download .txt
 functions.http('sign', async (req, res) => {
